@@ -1,0 +1,40 @@
+#!/bin/sh
+
+RCLONE_CONFIG=/config/rclone/rclone.conf
+
+if [ -z "$REMOTE_NAME" ]; then
+    echo "REMOTE_NAME is not set"
+    exit 1
+fi
+if [ -z "$REMOTE_URL" ]; then
+    echo "REMOTE_URL is not set"
+    exit 1
+fi
+if [ -z "$REMOTE_VENDOR" ]; then
+    echo "REMOTE_VENDOR is not set"
+    exit 1
+fi
+
+mkdir -p "$(dirname "$RCLONE_CONFIG")"
+
+cat <<EOF >"$RCLONE_CONFIG"
+[$REMOTE_NAME]
+type = webdav
+url = $REMOTE_URL
+vendor = $REMOTE_VENDOR
+nextcloud_chunk_size = 0
+EOF
+
+# parse args
+ifsBak=$IFS
+IFS=' '
+
+ARGS="$REMOTE_NAME:"
+for arg in $PROXY_ARGS; do
+    ARGS="$ARGS $arg"
+done
+
+IFS=$ifsBak
+
+# DO NOT QUOTE ARGS
+rclone serve s3 ${ARGS}
