@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Mikubill/gofakes3"
+	"github.com/JankariTech/gofakes3"
 	"github.com/ncw/swift/v2"
 	"github.com/rclone/rclone/backend/webdav"
 	"github.com/rclone/rclone/fs"
@@ -61,8 +61,8 @@ func (db *s3Backend) setAuthForWebDAV(accessKey string) (*vfs.VFS, error) {
 }
 
 // ListBuckets always returns the default bucket.
-func (db *s3Backend) ListBuckets() ([]gofakes3.BucketInfo, error) {
-	vf, err := db.setAuthForWebDAV("dummy")
+func (db *s3Backend) ListBuckets(accessKey string) ([]gofakes3.BucketInfo, error) {
+	vf, err := db.setAuthForWebDAV(accessKey)
 	if err != nil {
 		return nil, err
 	}
@@ -86,8 +86,8 @@ func (db *s3Backend) ListBuckets() ([]gofakes3.BucketInfo, error) {
 }
 
 // ListBucket lists the objects in the given bucket.
-func (db *s3Backend) ListBucket(bucket string, prefix *gofakes3.Prefix, page gofakes3.ListBucketPage) (*gofakes3.ObjectList, error) {
-	vf, err := db.setAuthForWebDAV("dummy")
+func (db *s3Backend) ListBucket(accessKey string, bucket string, prefix *gofakes3.Prefix, page gofakes3.ListBucketPage) (*gofakes3.ObjectList, error) {
+	vf, err := db.setAuthForWebDAV(accessKey)
 	if err != nil {
 		return nil, err
 	}
@@ -129,8 +129,8 @@ func (db *s3Backend) ListBucket(bucket string, prefix *gofakes3.Prefix, page gof
 // HeadObject returns the fileinfo for the given object name.
 //
 // Note that the metadata is not supported yet.
-func (db *s3Backend) HeadObject(bucketName, objectName string) (*gofakes3.Object, error) {
-	vf, err := db.setAuthForWebDAV("dummy")
+func (db *s3Backend) HeadObject(accessKey string, bucketName, objectName string) (*gofakes3.Object, error) {
+	vf, err := db.setAuthForWebDAV(accessKey)
 	if err != nil {
 		return nil, err
 	}
@@ -184,8 +184,8 @@ func (db *s3Backend) HeadObject(bucketName, objectName string) (*gofakes3.Object
 }
 
 // GetObject fetchs the object from the filesystem.
-func (db *s3Backend) GetObject(bucketName, objectName string, rangeRequest *gofakes3.ObjectRangeRequest) (obj *gofakes3.Object, err error) {
-	vf, err := db.setAuthForWebDAV("dummy")
+func (db *s3Backend) GetObject(accessKey string, bucketName, objectName string, rangeRequest *gofakes3.ObjectRangeRequest) (obj *gofakes3.Object, err error) {
+	vf, err := db.setAuthForWebDAV(accessKey)
 	if err != nil {
 		return nil, err
 	}
@@ -266,8 +266,8 @@ func (db *s3Backend) GetObject(bucketName, objectName string, rangeRequest *gofa
 }
 
 // TouchObject creates or updates meta on specified object.
-func (db *s3Backend) TouchObject(fp string, meta map[string]string) (result gofakes3.PutObjectResult, err error) {
-	vf, err := db.setAuthForWebDAV("dummy")
+func (db *s3Backend) TouchObject(accessKey string, fp string, meta map[string]string) (result gofakes3.PutObjectResult, err error) {
+	vf, err := db.setAuthForWebDAV(accessKey)
 	if err != nil {
 		return result, err
 	}
@@ -279,7 +279,7 @@ func (db *s3Backend) TouchObject(fp string, meta map[string]string) (result gofa
 			return result, err
 		}
 		_ = f.Close()
-		return db.TouchObject(fp, meta)
+		return db.TouchObject(accessKey, fp, meta)
 	} else if err != nil {
 		return result, err
 	}
@@ -312,11 +312,12 @@ func (db *s3Backend) TouchObject(fp string, meta map[string]string) (result gofa
 
 // PutObject creates or overwrites the object with the given name.
 func (db *s3Backend) PutObject(
+	accessKey string,
 	bucketName, objectName string,
 	meta map[string]string,
 	input io.Reader, size int64,
 ) (result gofakes3.PutObjectResult, err error) {
-	vf, err := db.setAuthForWebDAV("dummy")
+	vf, err := db.setAuthForWebDAV(accessKey)
 	if err != nil {
 		return result, err
 	}
@@ -345,7 +346,7 @@ func (db *s3Backend) PutObject(
 
 	if size == 0 {
 		// maybe a touch operation
-		return db.TouchObject(fp, meta)
+		return db.TouchObject(accessKey, fp, meta)
 	}
 
 	f, err := vf.Create(fp)
@@ -395,8 +396,8 @@ func (db *s3Backend) PutObject(
 }
 
 // DeleteMulti deletes multiple objects in a single request.
-func (db *s3Backend) DeleteMulti(bucketName string, objects ...string) (result gofakes3.MultiDeleteResult, rerr error) {
-	vf, err := db.setAuthForWebDAV("dummy")
+func (db *s3Backend) DeleteMulti(accessKey string, bucketName string, objects ...string) (result gofakes3.MultiDeleteResult, rerr error) {
+	vf, err := db.setAuthForWebDAV(accessKey)
 	if err != nil {
 		return result, err
 	}
@@ -423,8 +424,8 @@ func (db *s3Backend) DeleteMulti(bucketName string, objects ...string) (result g
 }
 
 // DeleteObject deletes the object with the given name.
-func (db *s3Backend) DeleteObject(bucketName, objectName string) (result gofakes3.ObjectDeleteResult, rerr error) {
-	vf, err := db.setAuthForWebDAV("dummy")
+func (db *s3Backend) DeleteObject(accessKey string, bucketName, objectName string) (result gofakes3.ObjectDeleteResult, rerr error) {
+	vf, err := db.setAuthForWebDAV(accessKey)
 	if err != nil {
 		return result, err
 	}
@@ -457,8 +458,8 @@ func (db *s3Backend) deleteObjectLocked(vf *vfs.VFS, bucketName, objectName stri
 }
 
 // CreateBucket creates a new bucket.
-func (db *s3Backend) CreateBucket(name string) error {
-	vf, err := db.setAuthForWebDAV("dummy")
+func (db *s3Backend) CreateBucket(accessKey string, name string) error {
+	vf, err := db.setAuthForWebDAV(accessKey)
 	if err != nil {
 		return err
 	}
@@ -479,8 +480,8 @@ func (db *s3Backend) CreateBucket(name string) error {
 }
 
 // DeleteBucket deletes the bucket with the given name.
-func (db *s3Backend) DeleteBucket(name string) error {
-	vf, err := db.setAuthForWebDAV("dummy")
+func (db *s3Backend) DeleteBucket(accessKey string, name string) error {
+	vf, err := db.setAuthForWebDAV(accessKey)
 	if err != nil {
 		return err
 	}
@@ -498,8 +499,8 @@ func (db *s3Backend) DeleteBucket(name string) error {
 }
 
 // BucketExists checks if the bucket exists.
-func (db *s3Backend) BucketExists(name string) (exists bool, err error) {
-	vf, err := db.setAuthForWebDAV("dummy")
+func (db *s3Backend) BucketExists(accessKey string, name string) (exists bool, err error) {
+	vf, err := db.setAuthForWebDAV(accessKey)
 	if err != nil {
 		return false, err
 	}
@@ -513,8 +514,8 @@ func (db *s3Backend) BucketExists(name string) (exists bool, err error) {
 }
 
 // CopyObject copy specified object from srcKey to dstKey.
-func (db *s3Backend) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, meta map[string]string) (result gofakes3.CopyObjectResult, err error) {
-	vf, err := db.setAuthForWebDAV("dummy")
+func (db *s3Backend) CopyObject(accessKey string, srcBucket, srcKey, dstBucket, dstKey string, meta map[string]string) (result gofakes3.CopyObjectResult, err error) {
+	vf, err := db.setAuthForWebDAV(accessKey)
 	if err != nil {
 		return result, err
 	}
@@ -543,7 +544,7 @@ func (db *s3Backend) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, met
 		return
 	}
 
-	c, err := db.GetObject(srcBucket, srcKey, nil)
+	c, err := db.GetObject(accessKey, srcBucket, srcKey, nil)
 	if err != nil {
 		return
 	}
@@ -560,7 +561,7 @@ func (db *s3Backend) CopyObject(srcBucket, srcKey, dstBucket, dstKey string, met
 		meta["mtime"] = swift.TimeToFloatString(cStat.ModTime())
 	}
 
-	_, err = db.PutObject(dstBucket, dstKey, meta, c.Contents, c.Size)
+	_, err = db.PutObject(accessKey, dstBucket, dstKey, meta, c.Contents, c.Size)
 	if err != nil {
 		return
 	}
