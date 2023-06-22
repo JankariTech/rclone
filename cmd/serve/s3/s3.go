@@ -44,18 +44,19 @@ var Command = &cobra.Command{
 	Long:  strings.ReplaceAll(longHelp, "|", "`") + httplib.Help(flagPrefix) + vfs.Help,
 	RunE: func(command *cobra.Command, args []string) error {
 		cmd.CheckArgs(1, 1, command, args)
-		f := cmd.NewFsSrc(args)
+		// f := cmd.NewFsSrc(args)
 
-		if Opt.hashName == "auto" {
-			Opt.hashType = f.Hashes().GetOne()
-		} else if Opt.hashName != "" {
+		// if Opt.hashName == "auto" {
+		// 	Opt.hashType = f.Hashes().GetOne()
+		// } else
+		if Opt.hashName != "" {
 			err := Opt.hashType.Set(Opt.hashName)
 			if err != nil {
 				return err
 			}
 		}
 		cmd.Run(false, false, command, func() error {
-			s, err := newServer(context.Background(), f, &Opt)
+			s, err := newServer(context.Background(), args, &Opt)
 			if err != nil {
 				return err
 			}
