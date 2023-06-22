@@ -7,7 +7,7 @@ import (
 	"math/rand"
 	"net/http"
 
-	"github.com/Mikubill/gofakes3"
+	"github.com/JankariTech/gofakes3"
 	"github.com/go-chi/chi/v5"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/hash"
@@ -51,7 +51,7 @@ func newServer(ctx context.Context, f fs.Fs, opt *Options) (s *Server, err error
 
 	var newLogger logger
 	w.faker = gofakes3.New(
-		newBackend(w.vfs, opt),
+		newBackend(opt, w),
 		gofakes3.WithHostBucket(!opt.pathBucketMode),
 		gofakes3.WithLogger(newLogger),
 		gofakes3.WithRequestID(rand.Uint64()),
