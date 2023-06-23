@@ -41,15 +41,8 @@ func newBackend(opt *Options, w *Server) gofakes3.Backend {
 }
 
 func (db *s3Backend) setAuthForWebDAV(accessKey string) (*vfs.VFS, error) {
-	// new Fs
-	// TODO: assert that args[0] is remote
-	info, name, remote, config, _ := fs.ConfigFs(db.w.args[0])
-	f, err := info.NewFs(context.Background(), name+accessKey, remote, config)
-	if err != nil {
-		return nil, err
-	}
 	// new VFS
-	vfs := vfs.New(f, &vfsflags.Opt)
+	vfs := vfs.NewVfs(db.w.f, &vfsflags.Opt, accessKey)
 
 	vfs.FlushDirCache()
 

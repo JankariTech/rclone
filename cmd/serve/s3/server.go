@@ -9,6 +9,7 @@ import (
 
 	"github.com/JankariTech/gofakes3"
 	"github.com/go-chi/chi/v5"
+	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/hash"
 	httplib "github.com/rclone/rclone/lib/http"
 )
@@ -27,17 +28,17 @@ type Options struct {
 // Server is a s3.FileSystem interface
 type Server struct {
 	*httplib.Server
+	f       fs.Fs
 	faker   *gofakes3.GoFakeS3
 	handler http.Handler
 	ctx     context.Context // for global config
-	args    []string
 }
 
 // Make a new S3 Server to serve the remote
-func newServer(ctx context.Context, args []string, opt *Options) (s *Server, err error) {
+func newServer(ctx context.Context, f fs.Fs, opt *Options) (s *Server, err error) {
 	w := &Server{
-		ctx:  ctx,
-		args: args,
+		f:   f,
+		ctx: ctx,
 	}
 
 	var newLogger logger
