@@ -178,7 +178,7 @@ var (
 
 // New creates a new VFS and root directory.  If opt is nil, then
 // DefaultOpt will be used
-func New(f fs.Fs, opt *vfscommon.Options) *VFS {
+func NewVfs(f fs.Fs, opt *vfscommon.Options, cacheName string) *VFS {
 	fsDir := fs.NewDir("", time.Now())
 	vfs := &VFS{
 		f:     f,
@@ -198,16 +198,12 @@ func New(f fs.Fs, opt *vfscommon.Options) *VFS {
 	// Find a VFS with the same name and options and return it if possible
 	activeMu.Lock()
 	defer activeMu.Unlock()
-	configName := fs.ConfigString(f)
-	for _, activeVFS := range active[configName] {
-		if vfs.Opt == activeVFS.Opt {
-			fs.Debugf(f, "Re-using VFS from active cache")
-			atomic.AddInt32(&activeVFS.inUse, 1)
-			return activeVFS
-		}
+	activeVFS := getVfsFromCache(cacheName, f, vfs)
+	if activeVFS != nil {
+		return activeVFS
 	}
 	// Put the VFS into the active cache
-	active[configName] = append(active[configName], vfs)
+	active[cacheName] = append(active[cacheName], vfs)
 
 	// Create root directory
 	vfs.root = newDir(vfs, f, nil, fsDir)
@@ -236,6 +232,22 @@ func New(f fs.Fs, opt *vfscommon.Options) *VFS {
 	vfs.SetCacheMode(vfs.Opt.CacheMode)
 
 	return vfs
+}
+
+func getVfsFromCache(cacheName string, f fs.Fs, vfs *VFS) *VFS {
+	for _, activeVFS := range active[cacheName] {
+		if vfs.Opt == activeVFS.Opt {
+			fs.Debugf(f, "Re-using VFS from active cache")
+			atomic.AddInt32(&activeVFS.inUse, 1)
+			return activeVFS
+		}
+	}
+	return nil
+}
+
+func New(f fs.Fs, opt *vfscommon.Options) *VFS {
+	configName := fs.ConfigString(f)
+	return NewVfs(f, opt, configName)
 }
 
 // Stats returns info about the VFS
