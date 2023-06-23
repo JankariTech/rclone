@@ -40,7 +40,7 @@ func newBackend(opt *Options, w *Server) gofakes3.Backend {
 	}
 }
 
-func (db *s3Backend) setAuthForWebDAV(accessKey string) (*vfs.VFS, error) {
+func (db *s3Backend) setAuthForWebDAV(accessKey string) *vfs.VFS {
 	// new VFS
 	vfs := vfs.NewVfs(db.w.f, &vfsflags.Opt, accessKey)
 
@@ -50,15 +50,12 @@ func (db *s3Backend) setAuthForWebDAV(accessKey string) (*vfs.VFS, error) {
 	if fs, ok := vfsFs.(*webdav.Fs); ok {
 		fs.SetBearerToken(accessKey)
 	}
-	return vfs, nil
+	return vfs
 }
 
 // ListBuckets always returns the default bucket.
 func (db *s3Backend) ListBuckets(accessKey string) ([]gofakes3.BucketInfo, error) {
-	vf, err := db.setAuthForWebDAV(accessKey)
-	if err != nil {
-		return nil, err
-	}
+	vf := db.setAuthForWebDAV(accessKey)
 
 	dirEntries, err := getDirEntries("/", vf)
 	if err != nil {
@@ -80,12 +77,9 @@ func (db *s3Backend) ListBuckets(accessKey string) ([]gofakes3.BucketInfo, error
 
 // ListBucket lists the objects in the given bucket.
 func (db *s3Backend) ListBucket(accessKey string, bucket string, prefix *gofakes3.Prefix, page gofakes3.ListBucketPage) (*gofakes3.ObjectList, error) {
-	vf, err := db.setAuthForWebDAV(accessKey)
-	if err != nil {
-		return nil, err
-	}
+	vf := db.setAuthForWebDAV(accessKey)
 
-	_, err = vf.Stat(bucket)
+	_, err := vf.Stat(bucket)
 	if err != nil {
 		return nil, gofakes3.BucketNotFound(bucket)
 	}
@@ -123,12 +117,9 @@ func (db *s3Backend) ListBucket(accessKey string, bucket string, prefix *gofakes
 //
 // Note that the metadata is not supported yet.
 func (db *s3Backend) HeadObject(accessKey string, bucketName, objectName string) (*gofakes3.Object, error) {
-	vf, err := db.setAuthForWebDAV(accessKey)
-	if err != nil {
-		return nil, err
-	}
+	vf := db.setAuthForWebDAV(accessKey)
 
-	_, err = vf.Stat(bucketName)
+	_, err := vf.Stat(bucketName)
 	if err != nil {
 		return nil, gofakes3.BucketNotFound(bucketName)
 	}
@@ -178,10 +169,7 @@ func (db *s3Backend) HeadObject(accessKey string, bucketName, objectName string)
 
 // GetObject fetchs the object from the filesystem.
 func (db *s3Backend) GetObject(accessKey string, bucketName, objectName string, rangeRequest *gofakes3.ObjectRangeRequest) (obj *gofakes3.Object, err error) {
-	vf, err := db.setAuthForWebDAV(accessKey)
-	if err != nil {
-		return nil, err
-	}
+	vf := db.setAuthForWebDAV(accessKey)
 
 	_, err = vf.Stat(bucketName)
 	if err != nil {
@@ -260,10 +248,7 @@ func (db *s3Backend) GetObject(accessKey string, bucketName, objectName string, 
 
 // TouchObject creates or updates meta on specified object.
 func (db *s3Backend) TouchObject(accessKey string, fp string, meta map[string]string) (result gofakes3.PutObjectResult, err error) {
-	vf, err := db.setAuthForWebDAV(accessKey)
-	if err != nil {
-		return result, err
-	}
+	vf := db.setAuthForWebDAV(accessKey)
 
 	_, err = vf.Stat(fp)
 	if err == vfs.ENOENT {
@@ -310,10 +295,7 @@ func (db *s3Backend) PutObject(
 	meta map[string]string,
 	input io.Reader, size int64,
 ) (result gofakes3.PutObjectResult, err error) {
-	vf, err := db.setAuthForWebDAV(accessKey)
-	if err != nil {
-		return result, err
-	}
+	vf := db.setAuthForWebDAV(accessKey)
 
 	_, err = vf.Stat(bucketName)
 	if err != nil {
@@ -390,10 +372,7 @@ func (db *s3Backend) PutObject(
 
 // DeleteMulti deletes multiple objects in a single request.
 func (db *s3Backend) DeleteMulti(accessKey string, bucketName string, objects ...string) (result gofakes3.MultiDeleteResult, rerr error) {
-	vf, err := db.setAuthForWebDAV(accessKey)
-	if err != nil {
-		return result, err
-	}
+	vf := db.setAuthForWebDAV(accessKey)
 
 	db.lock.Lock()
 	defer db.lock.Unlock()
@@ -418,10 +397,7 @@ func (db *s3Backend) DeleteMulti(accessKey string, bucketName string, objects ..
 
 // DeleteObject deletes the object with the given name.
 func (db *s3Backend) DeleteObject(accessKey string, bucketName, objectName string) (result gofakes3.ObjectDeleteResult, rerr error) {
-	vf, err := db.setAuthForWebDAV(accessKey)
-	if err != nil {
-		return result, err
-	}
+	vf := db.setAuthForWebDAV(accessKey)
 
 	db.lock.Lock()
 	defer db.lock.Unlock()
@@ -452,12 +428,9 @@ func (db *s3Backend) deleteObjectLocked(vf *vfs.VFS, bucketName, objectName stri
 
 // CreateBucket creates a new bucket.
 func (db *s3Backend) CreateBucket(accessKey string, name string) error {
-	vf, err := db.setAuthForWebDAV(accessKey)
-	if err != nil {
-		return err
-	}
+	vf := db.setAuthForWebDAV(accessKey)
 
-	_, err = vf.Stat(name)
+	_, err := vf.Stat(name)
 	if err != nil && err != vfs.ENOENT {
 		return gofakes3.ErrInternal
 	}
@@ -474,12 +447,9 @@ func (db *s3Backend) CreateBucket(accessKey string, name string) error {
 
 // DeleteBucket deletes the bucket with the given name.
 func (db *s3Backend) DeleteBucket(accessKey string, name string) error {
-	vf, err := db.setAuthForWebDAV(accessKey)
-	if err != nil {
-		return err
-	}
+	vf := db.setAuthForWebDAV(accessKey)
 
-	_, err = vf.Stat(name)
+	_, err := vf.Stat(name)
 	if err != nil {
 		return gofakes3.BucketNotFound(name)
 	}
@@ -493,10 +463,7 @@ func (db *s3Backend) DeleteBucket(accessKey string, name string) error {
 
 // BucketExists checks if the bucket exists.
 func (db *s3Backend) BucketExists(accessKey string, name string) (exists bool, err error) {
-	vf, err := db.setAuthForWebDAV(accessKey)
-	if err != nil {
-		return false, err
-	}
+	vf := db.setAuthForWebDAV(accessKey)
 
 	_, err = vf.Stat(name)
 	if err != nil {
@@ -508,10 +475,7 @@ func (db *s3Backend) BucketExists(accessKey string, name string) (exists bool, e
 
 // CopyObject copy specified object from srcKey to dstKey.
 func (db *s3Backend) CopyObject(accessKey string, srcBucket, srcKey, dstBucket, dstKey string, meta map[string]string) (result gofakes3.CopyObjectResult, err error) {
-	vf, err := db.setAuthForWebDAV(accessKey)
-	if err != nil {
-		return result, err
-	}
+	vf := db.setAuthForWebDAV(accessKey)
 
 	fp := path.Join(srcBucket, srcKey)
 	if srcBucket == dstBucket && srcKey == dstKey {
