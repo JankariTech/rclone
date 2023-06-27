@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -20,13 +22,15 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	"github.com/rclone/rclone/fs/object"
-
 	_ "github.com/rclone/rclone/backend/local"
+	"github.com/rclone/rclone/backend/webdav"
 	"github.com/rclone/rclone/cmd/serve/servetest"
 	"github.com/rclone/rclone/fs"
+	"github.com/rclone/rclone/fs/config"
+	"github.com/rclone/rclone/fs/config/configfile"
 	"github.com/rclone/rclone/fs/config/configmap"
 	"github.com/rclone/rclone/fs/hash"
+	"github.com/rclone/rclone/fs/object"
 	"github.com/rclone/rclone/fstest"
 	httplib "github.com/rclone/rclone/lib/http"
 	"github.com/stretchr/testify/assert"
@@ -34,13 +38,102 @@ import (
 )
 
 const (
-	endpoint = "localhost:0"
+	endpoint             = "localhost:0"
+	propfindResponseRoot = `
+<d:multistatus
+	xmlns:d="DAV:"
+	xmlns:s="http://sabredav.org/ns"
+	xmlns:oc="http://owncloud.org/ns"
+	xmlns:nc="http://nextcloud.org/ns">
+	<d:response>
+		<d:href>/</d:href>
+		<d:propstat>
+			<d:prop>
+				<d:displayname>admin</d:displayname>
+				<d:getlastmodified>Mon, 26 Jun 2023 04:17:38 GMT</d:getlastmodified>
+				<d:resourcetype>
+					<d:collection/>
+				</d:resourcetype>
+			</d:prop>
+			<d:status>HTTP/1.1 200 OK</d:status>
+		</d:propstat>
+		<d:propstat>
+			<d:prop>
+				<d:getcontentlength/>
+				<d:getcontenttype/>
+				<oc:checksums/>
+			</d:prop>
+			<d:status>HTTP/1.1 404 Not Found</d:status>
+		</d:propstat>
+	</d:response>
+	<d:response>
+		<d:href>/bucket/</d:href>
+		<d:propstat>
+			<d:prop>
+				<d:displayname>bucket</d:displayname>
+				<d:getlastmodified>Fri, 16 Jun 2023 11:11:32 GMT</d:getlastmodified>
+				<d:resourcetype>
+					<d:collection/>
+				</d:resourcetype>
+			</d:prop>
+			<d:status>HTTP/1.1 200 OK</d:status>
+		</d:propstat>
+		<d:propstat>
+			<d:prop>
+				<d:getcontentlength/>
+				<d:getcontenttype/>
+				<oc:checksums/>
+			</d:prop>
+			<d:status>HTTP/1.1 404 Not Found</d:status>
+		</d:propstat>
+	</d:response>
+	<d:response>
+		<d:href>/bucket2/</d:href>
+		<d:propstat>
+			<d:prop>
+				<d:displayname>bucket2</d:displayname>
+				<d:getlastmodified>Tue, 20 Jun 2023 04:00:56 GMT</d:getlastmodified>
+				<d:resourcetype>
+					<d:collection/>
+				</d:resourcetype>
+			</d:prop>
+			<d:status>HTTP/1.1 200 OK</d:status>
+		</d:propstat>
+		<d:propstat>
+			<d:prop>
+				<d:getcontentlength/>
+				<d:getcontenttype/>
+				<oc:checksums/>
+			</d:prop>
+			<d:status>HTTP/1.1 404 Not Found</d:status>
+		</d:propstat>
+	</d:response>
+	<d:response>
+		<d:href>/newbucket/</d:href>
+		<d:propstat>
+			<d:prop>
+				<d:displayname>newbucket</d:displayname>
+				<d:getlastmodified>Mon, 19 Jun 2023 07:38:24 GMT</d:getlastmodified>
+				<d:resourcetype>
+					<d:collection/>
+				</d:resourcetype>
+			</d:prop>
+			<d:status>HTTP/1.1 200 OK</d:status>
+		</d:propstat>
+		<d:propstat>
+			<d:prop>
+				<d:getcontentlength/>
+				<d:getcontenttype/>
+				<oc:checksums/>
+			</d:prop>
+			<d:status>HTTP/1.1 404 Not Found</d:status>
+		</d:propstat>
+	</d:response>
+</d:multistatus>`
 )
 
 // Configure and serve the server
-func serveS3(f fs.Fs) (testURL string, keyid string, keysec string) {
-	keyid = RandString(16)
-	keysec = RandString(16)
+func serveS3(f fs.Fs, keyid string, keysec string) (testURL string) {
 	serveropt := &Options{
 		HTTP:           httplib.DefaultCfg(),
 		pathBucketMode: true,
@@ -75,7 +168,9 @@ func RandString(n int) string {
 // s3 remote against it.
 func TestS3(t *testing.T) {
 	start := func(f fs.Fs) (configmap.Simple, func()) {
-		testURL, keyid, keysec := serveS3(f)
+		keyid := RandString(16)
+		keysec := RandString(16)
+		testURL := serveS3(f, keyid, keysec)
 		// Config for the backend we'll use to connect to the server
 		config := configmap.Simple{
 			"type":              "s3",
@@ -147,6 +242,60 @@ func RunS3UnitTests(t *testing.T, name string, start servetest.StartFn) {
 	assert.NoError(t, err, "Running "+name+" integration tests")
 }
 
+func prepareWebDavServer(t *testing.T, keyid string) func() {
+	// test the headers are there send a dummy response to About
+	expectedAuthHeader := "Bearer " + keyid
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		//what := fmt.Sprintf("%s %s: Header ", r.Method, r.URL.Path)
+		//assert.Equal(t, headers[1], r.Header.Get(headers[0]), what+headers[0])
+		assert.Equal(t, expectedAuthHeader, r.Header.Get("Authorization"))
+		fmt.Fprintf(w, propfindResponseRoot)
+	})
+
+	// Make the test server
+	ts := httptest.NewServer(handler)
+
+	_ = config.SetConfigPath("./testdata/webdav-tests.conf")
+
+	// Configure the remote
+	configfile.Install()
+	err := config.SetValueAndSave("webdavtest", "url", ts.URL)
+	assert.NoError(t, err)
+
+	// return a function to tidy up
+	return ts.Close
+}
+
+// prepare the test server and return a function to tidy it up afterwards
+func prepareWebDavFs(t *testing.T, keyid string) (fs.Fs, func()) {
+	tidy := prepareWebDavServer(t, keyid)
+
+	// Instantiate the WebDAV server
+	f, err := webdav.NewFs(context.Background(), "webdavtest", "", configmap.Simple{})
+	require.NoError(t, err)
+
+	return f, tidy
+}
+
+func TestForwardAccessKeyToWebDav(t *testing.T) {
+	keyid := RandString(16)
+	keysec := RandString(16)
+	f, clean := prepareWebDavFs(t, keyid)
+	defer clean()
+	endpoint := serveS3(f, keyid, keysec)
+	testURL, _ := url.Parse(endpoint)
+	minioClient, err := minio.New(testURL.Host, &minio.Options{
+		Creds:  credentials.NewStaticV4(keyid, keysec, ""),
+		Secure: false,
+	})
+	assert.NoError(t, err)
+	buckets, err := minioClient.ListBuckets(context.Background())
+	assert.NoError(t, err)
+	assert.Equal(t, buckets[0].Name, "bucket")
+	assert.Equal(t, buckets[1].Name, "bucket2")
+
+}
+
 // tests using the minio client
 func TestEncodingWithMinioClient(t *testing.T) {
 	cases := []struct {
@@ -193,8 +342,9 @@ func TestEncodingWithMinioClient(t *testing.T) {
 			)
 			_, err = f.Put(context.Background(), in, obji)
 			assert.NoError(t, err)
-
-			endpoint, keyid, keysec := serveS3(f)
+			keyid := RandString(16)
+			keysec := RandString(16)
+			endpoint := serveS3(f, keyid, keysec)
 			testURL, _ := url.Parse(endpoint)
 			minioClient, err := minio.New(testURL.Host, &minio.Options{
 				Creds:  credentials.NewStaticV4(keyid, keysec, ""),
