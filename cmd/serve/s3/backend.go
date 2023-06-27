@@ -42,15 +42,16 @@ func newBackend(opt *Options, w *Server) gofakes3.Backend {
 
 func (db *s3Backend) setAuthForWebDAV(accessKey string) *vfs.VFS {
 	// new VFS
-	vfs := vfs.NewVfs(db.w.f, &vfsflags.Opt, accessKey)
-
-	vfs.FlushDirCache()
-
-	vfsFs := vfs.Fs()
-	if fs, ok := vfsFs.(*webdav.Fs); ok {
+	if _, ok := db.w.f.(*webdav.Fs); ok {
+		info, name, remote, config, _ := fs.ConfigFs(db.w.f.Name() + ":")
+		f, _ := info.NewFs(context.Background(), name+accessKey, remote, config)
+		vfs := vfs.New(f, &vfsflags.Opt)
+		vfsFs := vfs.Fs()
+		fs := vfsFs.(*webdav.Fs)
 		fs.SetBearerToken(accessKey)
+		return vfs
 	}
-	return vfs
+	return vfs.New(db.w.f, &vfsflags.Opt)
 }
 
 // ListBuckets always returns the default bucket.
