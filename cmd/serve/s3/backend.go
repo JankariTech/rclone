@@ -45,11 +45,9 @@ func (db *s3Backend) setAuthForWebDAV(accessKey string) *vfs.VFS {
 	if _, ok := db.w.f.(*webdav.Fs); ok {
 		info, name, remote, config, _ := fs.ConfigFs(db.w.f.Name() + ":")
 		f, _ := info.NewFs(context.Background(), name+accessKey, remote, config)
-		vfs := vfs.New(f, &vfsflags.Opt)
-		vfsFs := vfs.Fs()
-		fs := vfsFs.(*webdav.Fs)
-		fs.SetBearerToken(accessKey)
-		return vfs
+		vf := vfs.New(f, &vfsflags.Opt)
+		vf.Fs().(*webdav.Fs).SetBearerToken(accessKey)
+		return vf
 	}
 	return vfs.New(db.w.f, &vfsflags.Opt)
 }
