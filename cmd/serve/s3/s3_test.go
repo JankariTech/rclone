@@ -17,13 +17,13 @@ import (
 	"os/exec"
 	"path"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	_ "github.com/rclone/rclone/backend/local"
-	"github.com/rclone/rclone/backend/webdav"
 	"github.com/rclone/rclone/cmd/serve/servetest"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config"
@@ -130,6 +130,40 @@ const (
 		</d:propstat>
 	</d:response>
 </d:multistatus>`
+	propfindEmptyBucketResponse = `
+<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
+  <d:response>
+    <d:href>/bucket/</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:getlastmodified>Wed, 28 Jun 2023 07:58:52 GMT</d:getlastmodified>
+        <d:resourcetype>
+          <d:collection/>
+        </d:resourcetype>
+        <d:quota-used-bytes>0</d:quota-used-bytes>
+        <d:quota-available-bytes>-3</d:quota-available-bytes>
+        <d:getetag>"649be83ccc047"</d:getetag>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>`
+	propfindFileResponse = `
+<d:multistatus xmlns:d="DAV:" xmlns:s="http://sabredav.org/ns" xmlns:oc="http://owncloud.org/ns" xmlns:nc="http://nextcloud.org/ns">
+  <d:response>
+    <d:href>/bucket/%s</d:href>
+    <d:propstat>
+      <d:prop>
+        <d:getcontentlength>%d</d:getcontentlength>
+        <d:resourcetype/>
+        <d:getetag>"a78a2b6eebbe67dda2c898c23c164eb6"</d:getetag>
+      </d:prop>
+      <d:status>HTTP/1.1 200 OK</d:status>
+    </d:propstat>
+  </d:response>
+</d:multistatus>
+`
 )
 
 // Configure and serve the server
@@ -139,7 +173,9 @@ func serveS3(f fs.Fs, keyid string, keysec string) (testURL string) {
 		pathBucketMode: true,
 		hashName:       "",
 		hashType:       hash.None,
-		authPair:       []string{fmt.Sprintf("%s,%s", keyid, keysec)},
+	}
+	if keyid != "" && keysec != "" {
+		serveropt.authPair = []string{fmt.Sprintf("%s,%s", keyid, keysec)}
 	}
 
 	serveropt.HTTP.ListenAddr = []string{endpoint}
@@ -242,16 +278,8 @@ func RunS3UnitTests(t *testing.T, name string, start servetest.StartFn) {
 	assert.NoError(t, err, "Running "+name+" integration tests")
 }
 
-func prepareWebDavServer(t *testing.T, keyid string) func() {
-	// test the headers are there send a dummy response to About
-	expectedAuthHeader := "Bearer " + keyid
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		//what := fmt.Sprintf("%s %s: Header ", r.Method, r.URL.Path)
-		//assert.Equal(t, headers[1], r.Header.Get(headers[0]), what+headers[0])
-		assert.Equal(t, expectedAuthHeader, r.Header.Get("Authorization"))
-		fmt.Fprintf(w, propfindResponseRoot)
-	})
-
+// prepare the test server and return a function to tidy it up afterwards
+func prepareWebDavFs(t *testing.T, handler http.HandlerFunc) (fs.Fs, func()) {
 	// Make the test server
 	ts := httptest.NewServer(handler)
 
@@ -262,25 +290,25 @@ func prepareWebDavServer(t *testing.T, keyid string) func() {
 	err := config.SetValueAndSave("webdavtest", "url", ts.URL)
 	assert.NoError(t, err)
 
-	// return a function to tidy up
-	return ts.Close
-}
-
-// prepare the test server and return a function to tidy it up afterwards
-func prepareWebDavFs(t *testing.T, keyid string) (fs.Fs, func()) {
-	tidy := prepareWebDavServer(t, keyid)
-
 	// Instantiate the WebDAV server
-	f, err := webdav.NewFs(context.Background(), "webdavtest", "", configmap.Simple{})
+	info, name, remote, webdavServerConfig, _ := fs.ConfigFs("webdavtest:")
+	f, err := info.NewFs(context.Background(), name, remote, webdavServerConfig)
+
 	require.NoError(t, err)
 
-	return f, tidy
+	return f, ts.Close
 }
 
 func TestForwardAccessKeyToWebDav(t *testing.T) {
 	keyid := RandString(16)
 	keysec := RandString(16)
-	f, clean := prepareWebDavFs(t, keyid)
+	expectedAuthHeader := "Bearer " + keyid
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, expectedAuthHeader, r.Header.Get("Authorization"))
+		_, err := fmt.Fprint(w, propfindResponseRoot)
+		assert.NoError(t, err)
+	})
+	f, clean := prepareWebDavFs(t, handler)
 	defer clean()
 	endpoint := serveS3(f, keyid, keysec)
 	testURL, _ := url.Parse(endpoint)
@@ -293,7 +321,90 @@ func TestForwardAccessKeyToWebDav(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, buckets[0].Name, "bucket")
 	assert.Equal(t, buckets[1].Name, "bucket2")
+}
 
+// when receiving multiple requests in parallel with different tokens we have to make sure the correct
+// Auth header is set for every request and there is no race-condition where parallel requests overwrite each
+// others headers
+// to test that case we send multiple PutObject requests with an object name that matches the S3 key
+// on the webdav side, we check if the object name is the same as the Auth Bearer token
+func TestForwardAccessKeyToWebDavParallelRequests(t *testing.T) {
+	webdavHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// the proxy will send different requests to check the path etc
+		if r.Method == "PROPFIND" {
+			if r.URL.Path == "/" {
+				_, err := fmt.Fprint(w, propfindResponseRoot)
+				assert.NoError(t, err)
+			} else if r.URL.Path == "/bucket/" {
+				_, err := fmt.Fprint(w, propfindEmptyBucketResponse)
+				assert.NoError(t, err)
+			} else {
+				// this is the main check, we want to make sure that the path belongs
+				// to the correct user
+				expectedKeyIdExtractedFromPath := path.Base(r.URL.Path)
+				assert.Equal(t, "Bearer "+expectedKeyIdExtractedFromPath, r.Header.Get("Authorization"))
+				_, err := fmt.Fprintf(w, propfindFileResponse, expectedKeyIdExtractedFromPath, 8)
+				assert.NoError(t, err)
+			}
+		} else if r.Method == "PUT" {
+			// this is the main check, we want to make sure that the path belongs
+			// to the correct user
+			expectedKeyIdExtractedFromPath := path.Base(r.URL.Path)
+			assert.Equal(t, "Bearer "+expectedKeyIdExtractedFromPath, r.Header.Get("Authorization"))
+		}
+	})
+	f, clean := prepareWebDavFs(t, webdavHandler)
+	defer clean()
+
+	keyids := []string{
+		"KeyOfUserAlice",
+		"KeyOfUserBob",
+		"KeyOfUserCarol",
+		"KeyOfUserDavid",
+	}
+	var wg sync.WaitGroup
+	wg.Add(len(keyids))
+
+	endpoint := serveS3(f, "", "")
+	testURL, _ := url.Parse(endpoint)
+
+	responseChannel := make(chan error)
+
+	for _, keyid := range keyids {
+		keyid := keyid
+		go func(responseChannel chan<- error) {
+			defer wg.Done()
+			minioClient, err := minio.New(testURL.Host, &minio.Options{
+				Creds:  credentials.NewStaticV4(keyid, "does-not-matter-will-be-ignored-by-server", ""),
+				Secure: false,
+			})
+			if err != nil {
+				responseChannel <- err
+				return
+			}
+			buf := bytes.NewBufferString("contents")
+			uploadHash := hash.NewMultiHasher()
+			in := io.TeeReader(buf, uploadHash)
+			_, err = minioClient.PutObject(
+				context.Background(), "bucket", keyid, in, int64(buf.Len()),
+				minio.PutObjectOptions{},
+			)
+			if err != nil {
+				responseChannel <- err
+				return
+			}
+		}(responseChannel)
+	}
+
+	go func() {
+		wg.Wait()
+		close(responseChannel)
+	}()
+
+	for i := 0; i < len(keyids); i++ {
+		response := <-responseChannel
+		assert.NoError(t, response)
+	}
 }
 
 // tests using the minio client
