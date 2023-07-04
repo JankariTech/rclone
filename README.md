@@ -2,6 +2,8 @@
 
 **This project is still under development**
 
+💸  [PointCab GmbH](https://pointcab-software.com/) is providing finances for this project
+
 ## Purpose
 Allow accessing WebDAV backends through the S3 protocol.
 
