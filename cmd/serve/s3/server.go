@@ -24,6 +24,7 @@ type Options struct {
 	hashType       hash.Type
 	authPair       []string
 	noCleanup      bool
+	asProxy        bool
 	HTTP           httplib.Config
 }
 

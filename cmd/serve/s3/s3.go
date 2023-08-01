@@ -19,6 +19,7 @@ var DefaultOpt = Options{
 	hashName:       "MD5",
 	hashType:       hash.MD5,
 	noCleanup:      false,
+	asProxy:        false,
 	HTTP:           httplib.DefaultCfg(),
 }
 
@@ -35,6 +36,7 @@ func init() {
 	flags.StringVarP(flagSet, &Opt.hashName, "etag-hash", "", Opt.hashName, "Which hash to use for the ETag, or auto or blank for off", "")
 	flags.StringArrayVarP(flagSet, &Opt.authPair, "auth-key", "", Opt.authPair, "Set key pair for v4 authorization: access_key_id,secret_access_key", "")
 	flags.BoolVarP(flagSet, &Opt.noCleanup, "no-cleanup", "", Opt.noCleanup, "Not to cleanup empty folder after object is deleted", "")
+	flags.BoolVarP(flagSet, &Opt.asProxy, "as-proxy", "", Opt.asProxy, "Serve as a proxy", "")
 }
 
 //go:embed serve_s3.md
