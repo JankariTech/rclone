@@ -19,12 +19,13 @@ import (
 // Options contains options for the http Server
 type Options struct {
 	//TODO add more options
-	pathBucketMode bool
-	hashName       string
-	hashType       hash.Type
-	authPair       []string
-	noCleanup      bool
-	HTTP           httplib.Config
+	pathBucketMode    bool
+	hashName          string
+	hashType          hash.Type
+	authPair          []string
+	noCleanup         bool
+	HTTP              httplib.Config
+	strongConsistency bool
 }
 
 // Server is a s3.FileSystem interface

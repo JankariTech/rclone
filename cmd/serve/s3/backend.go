@@ -26,7 +26,7 @@ var (
 
 type s3Backend struct {
 	opt  *Options
-	lock sync.Mutex
+	lock sync.RWMutex
 	fs   *vfs.VFS
 }
 
@@ -69,8 +69,10 @@ func (db *s3Backend) ListBucket(bucket string, prefix *gofakes3.Prefix, page gof
 		prefix = emptyPrefix
 	}
 
-	db.lock.Lock()
-	defer db.lock.Unlock()
+	if db.opt.strongConsistency {
+		db.lock.RLock()
+		defer db.lock.RUnlock()
+	}
 
 	// workaround
 	if strings.TrimSpace(prefix.Prefix) == "" {
@@ -105,8 +107,10 @@ func (db *s3Backend) HeadObject(bucketName, objectName string) (*gofakes3.Object
 		return nil, gofakes3.BucketNotFound(bucketName)
 	}
 
-	db.lock.Lock()
-	defer db.lock.Unlock()
+	if db.opt.strongConsistency {
+		db.lock.RLock()
+		defer db.lock.RUnlock()
+	}
 
 	fp := path.Join(bucketName, objectName)
 	node, err := db.fs.Stat(fp)
@@ -156,8 +160,10 @@ func (db *s3Backend) GetObject(bucketName, objectName string, rangeRequest *gofa
 		return nil, gofakes3.BucketNotFound(bucketName)
 	}
 
-	db.lock.Lock()
-	defer db.lock.Unlock()
+	if db.opt.strongConsistency {
+		db.lock.RLock()
+		defer db.lock.RUnlock()
+	}
 
 	fp := path.Join(bucketName, objectName)
 	node, err := db.fs.Stat(fp)
@@ -279,8 +285,10 @@ func (db *s3Backend) PutObject(
 		return result, gofakes3.BucketNotFound(bucketName)
 	}
 
-	db.lock.Lock()
-	defer db.lock.Unlock()
+	if db.opt.strongConsistency {
+		db.lock.Lock()
+		defer db.lock.Unlock()
+	}
 
 	fp := path.Join(bucketName, objectName)
 	objectDir := path.Dir(fp)
@@ -349,9 +357,6 @@ func (db *s3Backend) PutObject(
 
 // DeleteMulti deletes multiple objects in a single request.
 func (db *s3Backend) DeleteMulti(bucketName string, objects ...string) (result gofakes3.MultiDeleteResult, rerr error) {
-	db.lock.Lock()
-	defer db.lock.Unlock()
-
 	for _, object := range objects {
 		if err := db.deleteObjectLocked(bucketName, object); err != nil {
 			log.Println("delete object failed:", err)
@@ -372,18 +377,19 @@ func (db *s3Backend) DeleteMulti(bucketName string, objects ...string) (result g
 
 // DeleteObject deletes the object with the given name.
 func (db *s3Backend) DeleteObject(bucketName, objectName string) (result gofakes3.ObjectDeleteResult, rerr error) {
-	db.lock.Lock()
-	defer db.lock.Unlock()
-
 	return result, db.deleteObjectLocked(bucketName, objectName)
 }
 
 // deleteObjectLocked deletes the object from the filesystem.
 func (db *s3Backend) deleteObjectLocked(bucketName, objectName string) error {
-
 	_, err := db.fs.Stat(bucketName)
 	if err != nil {
 		return gofakes3.BucketNotFound(bucketName)
+	}
+
+	if db.opt.strongConsistency {
+		db.lock.Lock()
+		defer db.lock.Unlock()
 	}
 
 	fp := path.Join(bucketName, objectName)

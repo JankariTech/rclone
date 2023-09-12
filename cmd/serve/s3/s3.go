@@ -15,11 +15,12 @@ import (
 
 // DefaultOpt is the default values used for Options
 var DefaultOpt = Options{
-	pathBucketMode: true,
-	hashName:       "MD5",
-	hashType:       hash.MD5,
-	noCleanup:      false,
-	HTTP:           httplib.DefaultCfg(),
+	pathBucketMode:    true,
+	hashName:          "MD5",
+	hashType:          hash.MD5,
+	noCleanup:         false,
+	strongConsistency: false,
+	HTTP:              httplib.DefaultCfg(),
 }
 
 // Opt is options set by command line flags
@@ -35,6 +36,7 @@ func init() {
 	flags.StringVarP(flagSet, &Opt.hashName, "etag-hash", "", Opt.hashName, "Which hash to use for the ETag, or auto or blank for off", "")
 	flags.StringArrayVarP(flagSet, &Opt.authPair, "s3-authkey", "", Opt.authPair, "Set key pair for v4 authorization, split by comma", "")
 	flags.BoolVarP(flagSet, &Opt.noCleanup, "no-cleanup", "", Opt.noCleanup, "Not to cleanup empty folder after object is deleted", "")
+	flags.BoolVarP(flagSet, &Opt.strongConsistency, "strong-consistency", "", Opt.strongConsistency, "Lock backstore during write operations (permits multiple reads under absence of write lock)", "")
 }
 
 // Command definition for cobra
