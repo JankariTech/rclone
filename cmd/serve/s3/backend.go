@@ -41,7 +41,7 @@ func newBackend(opt *Options, w *Server) gofakes3.Backend {
 }
 
 func (b *s3Backend) getVfs(accessKey string) *vfs.VFS {
-	if b.opt.asProxy {
+	if b.opt.proxyMode {
 		// new VFS
 		if _, ok := b.w.f.(*webdav.Fs); ok {
 			info, name, remote, config, _ := fs.ConfigFs(b.w.f.Name() + ":")

@@ -4,7 +4,9 @@ import (
 	"context"
 	_ "embed"
 
+	"github.com/rclone/rclone/backend/webdav"
 	"github.com/rclone/rclone/cmd"
+	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config/flags"
 	"github.com/rclone/rclone/fs/hash"
 	httplib "github.com/rclone/rclone/lib/http"
@@ -19,7 +21,7 @@ var DefaultOpt = Options{
 	hashName:       "MD5",
 	hashType:       hash.MD5,
 	noCleanup:      false,
-	asProxy:        false,
+	proxyMode:      false,
 	HTTP:           httplib.DefaultCfg(),
 }
 
@@ -36,7 +38,7 @@ func init() {
 	flags.StringVarP(flagSet, &Opt.hashName, "etag-hash", "", Opt.hashName, "Which hash to use for the ETag, or auto or blank for off", "")
 	flags.StringArrayVarP(flagSet, &Opt.authPair, "auth-key", "", Opt.authPair, "Set key pair for v4 authorization: access_key_id,secret_access_key", "")
 	flags.BoolVarP(flagSet, &Opt.noCleanup, "no-cleanup", "", Opt.noCleanup, "Not to cleanup empty folder after object is deleted", "")
-	flags.BoolVarP(flagSet, &Opt.asProxy, "as-proxy", "", Opt.asProxy, "Serve as a proxy", "")
+	flags.BoolVarP(flagSet, &Opt.proxyMode, "proxy-mode", "", Opt.proxyMode, "Serve as a proxy for s3 clients", "")
 }
 
 //go:embed serve_s3.md
@@ -55,6 +57,11 @@ var Command = &cobra.Command{
 	RunE: func(command *cobra.Command, args []string) error {
 		cmd.CheckArgs(1, 1, command, args)
 		f := cmd.NewFsSrc(args)
+
+		if _, ok := f.(*webdav.Fs); !ok && Opt.proxyMode {
+			fs.Logf("serve s3", "Proxy mode is not supported for %s provider", f.Name())
+			return fs.ErrorNotImplemented
+		}
 
 		if Opt.hashName == "auto" {
 			Opt.hashType = f.Hashes().GetOne()
