@@ -167,13 +167,14 @@ const (
 )
 
 // Configure and serve the server
-func serveS3(f fs.Fs, keyid string, keysec string) (testURL string) {
+func serveS3(f fs.Fs, keyid string, keysec string, proxyMode bool) (testURL string) {
 	serveropt := &Options{
 		HTTP:           httplib.DefaultCfg(),
 		pathBucketMode: true,
 		hashName:       "",
 		hashType:       hash.None,
 	}
+	serveropt.proxyMode = proxyMode
 	if keyid != "" && keysec != "" {
 		serveropt.authPair = []string{fmt.Sprintf("%s,%s", keyid, keysec)}
 	}
@@ -206,7 +207,7 @@ func TestS3(t *testing.T) {
 	start := func(f fs.Fs) (configmap.Simple, func()) {
 		keyid := RandString(16)
 		keysec := RandString(16)
-		testURL := serveS3(f, keyid, keysec)
+		testURL := serveS3(f, keyid, keysec, false)
 		// Config for the backend we'll use to connect to the server
 		config := configmap.Simple{
 			"type":              "s3",
@@ -310,7 +311,7 @@ func TestForwardAccessKeyToWebDav(t *testing.T) {
 	})
 	f, clean := prepareWebDavFs(t, handler)
 	defer clean()
-	endpoint := serveS3(f, keyid, keysec)
+	endpoint := serveS3(f, keyid, keysec, true)
 	testURL, _ := url.Parse(endpoint)
 	minioClient, err := minio.New(testURL.Host, &minio.Options{
 		Creds:  credentials.NewStaticV4(keyid, keysec, ""),
@@ -365,7 +366,7 @@ func TestForwardAccessKeyToWebDavParallelRequests(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(len(keyids))
 
-	endpoint := serveS3(f, "", "")
+	endpoint := serveS3(f, "", "", true)
 	testURL, _ := url.Parse(endpoint)
 
 	responseChannel := make(chan error)
@@ -455,7 +456,7 @@ func TestEncodingWithMinioClient(t *testing.T) {
 			assert.NoError(t, err)
 			keyid := RandString(16)
 			keysec := RandString(16)
-			endpoint := serveS3(f, keyid, keysec)
+			endpoint := serveS3(f, keyid, keysec, false)
 			testURL, _ := url.Parse(endpoint)
 			minioClient, err := minio.New(testURL.Host, &minio.Options{
 				Creds:  credentials.NewStaticV4(keyid, keysec, ""),
