@@ -4,8 +4,8 @@ import (
 	"context"
 	_ "embed"
 
-	"github.com/rclone/rclone/backend/webdav"
 	"github.com/rclone/rclone/cmd"
+	"github.com/rclone/rclone/cmd/serve/proxy/proxyflags"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config/flags"
 	"github.com/rclone/rclone/fs/hash"
@@ -21,6 +21,7 @@ var DefaultOpt = Options{
 	hashName:       "MD5",
 	hashType:       hash.MD5,
 	noCleanup:      false,
+	Auth:           httplib.DefaultAuthCfg(),
 	HTTP:           httplib.DefaultCfg(),
 	proxyMode:      false,
 }
@@ -32,8 +33,10 @@ const flagPrefix = ""
 
 func init() {
 	flagSet := Command.Flags()
+	httplib.AddAuthFlagsPrefix(flagSet, flagPrefix, &Opt.Auth)
 	httplib.AddHTTPFlagsPrefix(flagSet, flagPrefix, &Opt.HTTP)
 	vfsflags.AddFlags(flagSet)
+	proxyflags.AddFlags(flagSet)
 	flags.BoolVarP(flagSet, &Opt.pathBucketMode, "force-path-style", "", Opt.pathBucketMode, "If true use path style access if false use virtual hosted style (default true)", "")
 	flags.StringVarP(flagSet, &Opt.hashName, "etag-hash", "", Opt.hashName, "Which hash to use for the ETag, or auto or blank for off", "")
 	flags.StringArrayVarP(flagSet, &Opt.authPair, "auth-key", "", Opt.authPair, "Set key pair for v4 authorization: access_key_id,secret_access_key", "")
@@ -53,15 +56,20 @@ var Command = &cobra.Command{
 	},
 	Use:   "s3 remote:path",
 	Short: `Serve remote:path over s3.`,
-	Long:  serveS3Help + httplib.Help(flagPrefix) + vfs.Help,
+	Long:  serveS3Help + httplib.Help(flagPrefix) + httplib.AuthHelp(flagPrefix) + vfs.Help,
 	RunE: func(command *cobra.Command, args []string) error {
-		cmd.CheckArgs(1, 1, command, args)
-		f := cmd.NewFsSrc(args)
-
-		if _, ok := f.(*webdav.Fs); !ok && Opt.proxyMode {
-			fs.Logf("serve s3", "--proxy-mode is supported only for 'webdav' provider")
-			return fs.ErrorNotImplemented
+		var f fs.Fs
+		if proxyflags.Opt.AuthProxy == "" {
+			cmd.CheckArgs(1, 1, command, args)
+			f = cmd.NewFsSrc(args)
+		} else {
+			cmd.CheckArgs(0, 0, command, args)
 		}
+
+		// if _, ok := f.(*webdav.Fs); !ok && Opt.proxyMode {
+		// 	fs.Logf("serve s3", "--proxy-mode is supported only for 'webdav' provider")
+		// 	return fs.ErrorNotImplemented
+		// }
 
 		if Opt.hashName == "auto" {
 			Opt.hashType = f.Hashes().GetOne()
