@@ -3,6 +3,8 @@ package s3
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -59,6 +61,10 @@ func newServer(ctx context.Context, f fs.Fs, opt *Options) (s *Server, err error
 		opt: *opt,
 	}
 
+	if len(opt.authPair) == 0 {
+		fs.Logf("serve s3", "No auth provided so allowing anonymous access")
+	}
+
 	var newLogger logger
 	w.faker = gofakes3.New(
 		newBackend(w, opt),
@@ -74,17 +80,11 @@ func newServer(ctx context.Context, f fs.Fs, opt *Options) (s *Server, err error
 	w.handler = w.faker.Server()
 
 	if proxyflags.Opt.AuthProxy != "" {
-		fmt.Println("proxy mode...")
 		w.proxy = proxy.New(ctx, &proxyflags.Opt)
-		// override auth
-		// w.opt.Auth.CustomAuthFn = w.auth
-		w.handler = middlewareAuthCustom(w.handler, w)
+		// auth middleware
+		w.handler = authMiddleware(w.handler, w)
 	} else {
 		w._vfs = vfs.New(f, &vfsflags.Opt)
-	}
-
-	if len(opt.authPair) == 0 {
-		fs.Logf("serve s3", "No auth provided so allowing anonymous access")
 	}
 
 	w.Server, err = httplib.NewServer(ctx,
@@ -95,40 +95,19 @@ func newServer(ctx context.Context, f fs.Fs, opt *Options) (s *Server, err error
 		return nil, fmt.Errorf("failed to init server: %w", err)
 	}
 
-
-	// if opt.proxyMode {
-	// 	w.handler = proxyMiddleware(w.handler, w)
-	// } else {
-	// 	w._vfs = vfs.New(f, &vfsflags.Opt)
-	// }
-
 	return w, nil
 }
 
-// func (w *Server) getVFS(ctx context.Context) (VFS *vfs.VFS, err error) {
-// 	if w._vfs != nil {
-// 		return w._vfs, nil
-// 	}
-// 	value := ctx.Value(ctxKeyId)
-// 	if value == nil {
-// 		return nil, errors.New("no VFS found in context")
-// 	}
-// 	VFS, ok := value.(*vfs.VFS)
-// 	if !ok {
-// 		return nil, fmt.Errorf("context value is not VFS: %#v", value)
-// 	}
-// 	return VFS, nil
-// }
-
-// Gets the VFS in use for this request
 func (w *Server) getVFS(ctx context.Context) (VFS *vfs.VFS, err error) {
 	if w._vfs != nil {
 		return w._vfs, nil
 	}
-	value := httplib.CtxGetAuth(ctx)
+
+	value := ctx.Value(ctxKeyId)
 	if value == nil {
 		return nil, errors.New("no VFS found in context")
 	}
+
 	VFS, ok := value.(*vfs.VFS)
 	if !ok {
 		return nil, fmt.Errorf("context value is not VFS: %#v", value)
@@ -136,11 +115,9 @@ func (w *Server) getVFS(ctx context.Context) (VFS *vfs.VFS, err error) {
 	return VFS, nil
 }
 
-
 // auth does proxy authorization
 func (w *Server) auth(accessKeyId string) (value interface{}, err error) {
-	fmt.Println("auth called...")
-	VFS, _, err := w.proxy.Call(accessKeyId, "", false)
+	VFS, _, err := w.proxy.Call(stringToMd5Hash(accessKeyId), accessKeyId, false)
 	if err != nil {
 		return nil, err
 	}
@@ -158,28 +135,22 @@ func (w *Server) serve() error {
 	return nil
 }
 
-func middlewareAuthCustom(next http.Handler, ws *Server) http.Handler {
+func authMiddleware(next http.Handler, ws *Server) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		accessKey, _ := parseAuthToken(r)
+		accessKey, _ := parseAccessKeyId(r)
 		value, err := ws.auth(accessKey)
 		if err != nil {
 			fs.Infof(r.URL.Path, "%s: Auth failed: %v", r.RemoteAddr, err)
 		}
-
 		if value != nil {
 			r = r.WithContext(context.WithValue(r.Context(), ctxKeyId, value))
 		}
-		// info, name, remote, config, _ := fs.ConfigFs(ws.f.Name() + ":")
-		// newFs, _ := info.NewFs(r.Context(), name+stringToMd5Hash(accessKey), remote, config)
-		// _vfs := vfs.New(newFs, &vfsflags.Opt)
-		// _vfs.Fs().(*webdav.Fs).SetBearerToken(accessKey)
 
-		// ctx := context.WithValue(r.Context(), ctxKeyId, _vfs)
 		next.ServeHTTP(w, r)
 	})
 }
 
-func parseAuthToken(r *http.Request) (accessKey string, error signature.ErrorCode) {
+func parseAccessKeyId(r *http.Request) (accessKey string, error signature.ErrorCode) {
 	v4Auth := r.Header.Get("Authorization")
 	req, err := signature.ParseSignV4(v4Auth)
 	if err != signature.ErrNone {
@@ -189,8 +160,8 @@ func parseAuthToken(r *http.Request) (accessKey string, error signature.ErrorCod
 	return req.Credential.GetAccessKey(), signature.ErrNone
 }
 
-// func stringToMd5Hash(s string) string {
-// 	hasher := md5.New()
-// 	hasher.Write([]byte(s))
-// 	return hex.EncodeToString(hasher.Sum(nil))
-// }
+func stringToMd5Hash(s string) string {
+	hasher := md5.New()
+	hasher.Write([]byte(s))
+	return hex.EncodeToString(hasher.Sum(nil))
+}
