@@ -1,41 +1,32 @@
-FROM golang AS builder
+FROM rclone/rclone:latest AS binaries
 
-WORKDIR /rclone/
-COPY go.mod /rclone/
-RUN go mod download
-
-COPY . /rclone/
-
-RUN \
-  CGO_ENABLED=0 \
-  make && \
-  ./rclone version
-
-
-# Begin final image
+# final image
 FROM alpine:latest
 
-COPY --from=builder /rclone/rclone /usr/local/bin/
+# copy the rclone binary from the official image
+COPY --from=binaries /usr/local/bin/rclone /usr/local/bin/rclone
 
+# copy startup and auth proxy scripts
 COPY ["./docker/startup", "/startup"]
+COPY ["./docker/auth-proxy.py", "/usr/local/bin/auth-proxy.py"]
 
+# add python for the auth proxy script
 RUN apk --no-cache add \
+  python3 \
   ca-certificates \
   fuse3 \
   tzdata \
   && apk cache clean
 
+# make scripts executable
 RUN echo "user_allow_other" >> /etc/fuse.conf && \
-  addgroup -g 1009 rclone && \
-  adduser -u 1009 -Ds /bin/sh -G rclone rclone && \
-  chmod +x /startup
+  chmod +x /startup /usr/local/bin/auth-proxy.py
 
 WORKDIR /data
 
 ENV XDG_CONFIG_HOME=/config
 
-# remote configs
-ENV REMOTE_NAME=""
+# remote configs (used by auth-proxy.py)
 ENV REMOTE_URL=""
 ENV REMOTE_VENDOR=""
 
