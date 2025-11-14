@@ -25,16 +25,13 @@ vendor = $REMOTE_VENDOR
 nextcloud_chunk_size = 0
 EOF
 
-# parse args
-ifsBak=$IFS
-IFS=' '
-
-ARGS="$REMOTE_NAME:"
-for arg in $PROXY_ARGS; do
-    ARGS="$ARGS $arg"
-done
-
-IFS=$ifsBak
-
-# DO NOT QUOTE ARGS
-rclone serve s3 ${ARGS}
+# Check if --auth-proxy is part of PROXY_ARGS
+if echo " $PROXY_ARGS " | grep -q ' --auth-proxy '; then
+  # Auth-proxy mode for per-user access.
+  # Do not pass the remote name as an argument.
+  exec rclone serve s3 $PROXY_ARGS
+else
+  # Anonymous or single-user mode.
+  # Pass the remote name as an argument.
+  exec rclone serve s3 $PROXY_ARGS "$REMOTE_NAME:"
+fi
